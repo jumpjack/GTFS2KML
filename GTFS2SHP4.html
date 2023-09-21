@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Converti shapes.txt in file KML con nomi basati su routes.txt</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+</head>
+<body>
+    <h1>Converti shapes.txt in file KML</h1>
+    <label for="shapesInput">Carica shapes.txt: </label><input type="file" id="shapesInput" accept=".txt"><span id="shapesStatus"></span><br>
+    <label for="shapesInput">Carica routes.txt: </label><input type="file" id="routesInput" accept=".txt"><span id="routesStatus"></span><br>
+    <label for="shapesInput">Carica trips.txt: </label><input type="file" id="tripsInput" accept=".txt"><span id="tripsStatus"></span><br>
+    <button onclick="convertToKML()">Converti</button><br>
+		Status:<span id="status"></span><br>
+    <script>
+		const shapesStatus = document.getElementById("shapesStatus");
+		const routesStatus = document.getElementById("routesStatus");
+		const tripsStatus = document.getElementById("tripsStatus");
+        async function loadRoutesFile() {
+            const routesInput = document.getElementById("routesInput");
+            return new Promise((resolve, reject) => {
+                if (routesInput.files.length === 0) {
+                    reject("Carica un file routes.txt prima di convertire.");
+                }
+                const file = routesInput.files[0];
+                const reader = new FileReader();
+console.log(reader);
+
+                reader.onload = function (e) {
+                    const text = e.target.result;
+                    const rows = text.split("\n").map(line => line.split(","));
+                    const routes = {};
+                    for (let i = 1; i < rows.length; i++) {
+                        const [raw_route_id, agency_id, route_short_name, route_long_name] = rows[i];
+												const route_id = raw_route_id.replace(/["']/g, '');
+                        routes[route_id] = route_long_name;
+                    }
+                    resolve(routes);
+                };
+								reader.onprogress = function (e) {
+									routesStatus.innerHTML = (100*(e.loaded/e.total)).toFixed(0) + "%";
+								};
+
+                reader.readAsText(file);
+            });
+        }
+
+
+        async function loadShapesFile() {
+            const routesInput = document.getElementById("shapesInput");
+            return new Promise((resolve, reject) => {
+                if (shapesInput.files.length === 0) {
+                    reject("Carica un file routes.txt prima di convertire.");
+                }
+                const file = shapesInput.files[0];
+                const reader = new FileReader();
+
+                reader.onload = function (e) {
+                    const text = e.target.result;
+                    const rows = text.split("\n").map(line => line.split(","));
+
+
+                const data = [];
+                for (let i = 1; i < rows.length; i++) { // Inizia da 1 per saltare l'intestazione
+                    const row = rows[i];
+                    if (row.length === 4) {
+                        const [shape_id, shape_pt_lat, shape_pt_lon, shape_pt_sequence] = row;
+                        // Rimuovi le virgolette da shape_pt_lat e shape_pt_lon
+                        const cleaned_lat = shape_pt_lat.replace(/"/g, '');
+                        const cleaned_lon = shape_pt_lon.replace(/"/g, '');
+                        data.push({
+                            shape_id,
+                            shape_pt_lat: cleaned_lat,
+                            shape_pt_lon: cleaned_lon,
+                            shape_pt_sequence,
+                        });
+                    }
+                }
+								 resolve(data);
+							};
+							reader.onprogress = function (e) {
+								shapesStatus.innerHTML = (100*(e.loaded/e.total)).toFixed(0) + "%";
+							};
+                reader.readAsText(file);
+            });
+        }
+
+				async function loadTripsFile() {
+				    const tripsInput = document.getElementById("tripsInput");
+				    return new Promise((resolve, reject) => {
+				        if (tripsInput.files.length === 0) {
+				            reject("Carica un file trips.txt prima di convertire.");
+				        }
+				        const file = tripsInput.files[0];
+				        const reader = new FileReader();
+
+				        reader.onload = function (e) {
+				            const text = e.target.result;
+				            const rows = text.split("\n").map(line => line.split(","));
+				            const shapeToRouteMap = {};
+				            for (let i = 1; i < rows.length; i++) {
+												if (rows[i] !== "") {
+					                const [route_id, service_id, trip_id, direction_id, shape_id] = rows[i];
+						              const cleanedRouteId = route_id.replace(/["']/g, ''); // Rimuovi le virgolette
+													if (shape_id !== undefined) {
+						                const cleanedShapeId = shape_id.replace(/["']/g, ''); // Rimuovi le virgolette
+														if (cleanedShapeId !== undefined) {
+						                	shapeToRouteMap[cleanedShapeId] = cleanedRouteId;
+														}
+													}
+												}
+				            }
+				            resolve(shapeToRouteMap);
+				        };
+								reader.onprogress = function (e) {
+									tripsStatus.innerHTML = (100*(e.loaded/e.total)).toFixed(0) + "%";
+								};
+				        reader.readAsText(file);
+				    });
+				}
+
+
+
+        async function convertToKML() {
+            const shapesInput = document.getElementById("shapesInput");
+            const routes = await loadRoutesFile();
+    				const shapeToRouteMap = await loadTripsFile();
+						const shapes = await loadShapesFile();
+
+console.log(shapeToRouteMap);
+
+            const groupedData = groupLinesByShapeId(shapes);
+
+            // Divide i dati in gruppi di 10 o meno
+            const groups = Object.values(groupedData);
+            const maxGroupsPerFile = 3000;
+            const numFiles = Math.ceil(groups.length / maxGroupsPerFile);
+
+
+var progress=0;
+
+                for (let i = 0; i < numFiles; i++) {
+                    const startIdx = i * maxGroupsPerFile;
+                    const endIdx = startIdx + maxGroupsPerFile;
+                    const fileGroups = groups.slice(startIdx, endIdx);
+
+									   var kml = '<?xml version="1.0" encoding="UTF-8"?>' +
+									                '<kml xmlns="http://www.opengis.net/kml/2.2">' +
+									                '<Document>' +
+									                '<Folder>' +
+									                '<name>Linee</name>';
+
+									    fileGroups.forEach(group => {
+progress++;
+//shapesStatus.innerHTML = progress;
+console.log(progress);
+									        const shapeId = String(group[0].shape_id).replace(/["']/g, '');
+													const routeId = shapeToRouteMap[shapeId];
+
+									        // Cerca il nome nel file routes basato su shape_id
+									        const routeName = routes[routeId];
+
+//console.log(shapeId, routeId, routeName);
+
+									        kml += '<Placemark>' +
+									               `<name>${routeName}</name>` + // Aggiunge il nome come shape_id
+									               '<LineString>' +
+									               '<coordinates>' +
+									               group.map(row => `${parseFloat(row.shape_pt_lon)},${parseFloat(row.shape_pt_lat)},0`).join(' ') +
+									               '</coordinates>' +
+									               '</LineString>' +
+									               '</Placemark>';
+									    });
+
+									    kml += '</Folder></Document></kml>';
+
+									    // Creazione di un oggetto Blob per il file KML
+									    const kmlBlob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
+
+									    // Creazione di un nome file univoco
+									    const fileNameKML = `output_${i + 1}.kml`;
+
+									    // Salvataggio del file KML usando FileSaver.js
+
+									    saveAs(kmlBlob, fileNameKML);
+
+                }
+
+        }
+
+        function groupLinesByShapeId(data) {
+            const groupedData = {};
+            data.forEach((row) => {
+                const shapeId = row.shape_id;
+                if (!groupedData[shapeId]) {
+                    groupedData[shapeId] = [];
+                }
+                groupedData[shapeId].push(row);
+            });
+            return groupedData;
+        }
+
+// Carica e analizza il file trips.txt per creare una mappatura tra shape_id e route_id
+
+
+    </script>
+</body>
+</html>
+
